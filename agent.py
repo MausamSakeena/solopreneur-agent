@@ -88,7 +88,7 @@ Write the reply now."""
         "HTTP-Referer": "https://midskilled.gumroad.com",
     }
     body = {
-        "model": "mistralai/mistral-7b-instruct:free",
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
