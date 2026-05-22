@@ -1,16 +1,11 @@
 import os
 import re
 import time
-import smtplib
 import requests
 from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-EMAIL_ADDRESS      = os.environ.get("EMAIL_ADDRESS")
-EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD")
 
 SHEET_ID      = "1QZNmClClOrN0Lr40c9cZg-rNbDpv8Yu_FBmNzs5BjEA"
 GUMROAD_LINK  = "https://midskilled.gumroad.com/l/Zero-BudgetSolopreneurOS2026"
@@ -35,7 +30,7 @@ PLATFORM_INSTRUCTIONS = {
     "pinterest":"Write a Pinterest pin description about side hustles, freelancing, or AI tools. Include relevant keywords naturally. End with a soft CTA and the Gumroad link. Under 150 words. Tone: inspiring, punchy, benefit-focused.",
 }
 
-# ── READ GOOGLE SHEET (public read — no auth needed) ─────────────────────────
+# ── READ GOOGLE SHEET ─────────────────────────────────────────────────────────
 def get_sheet_rows():
     url = (
         f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
@@ -60,10 +55,10 @@ def fetch_url_content(url):
     except Exception as e:
         return f"Could not fetch URL: {e}"
 
-# ── GENERATE DRAFT VIA OPENROUTER ─────────────────────────────────────────────
+# ── GENERATE DRAFT ────────────────────────────────────────────────────────────
 def generate_reply(platform, url, page_content):
-    platform_key  = platform.lower().strip()
-    instructions  = PLATFORM_INSTRUCTIONS.get(platform_key, PLATFORM_INSTRUCTIONS["facebook"])
+    platform_key = platform.lower().strip()
+    instructions = PLATFORM_INSTRUCTIONS.get(platform_key, PLATFORM_INSTRUCTIONS["facebook"])
 
     system_prompt = f"""You are a helpful solopreneur who genuinely wants to help people start side hustles and freelance businesses. You have a product you mention naturally — never spammily.
 
@@ -112,44 +107,42 @@ Write the reply now."""
         return r.json()["choices"][0]["message"]["content"].strip()
     return f"ERROR {r.status_code}: {r.text[:200]}"
 
-# ── SEND EMAIL ────────────────────────────────────────────────────────────────
-def send_email(drafts):
-    if not drafts:
-        print("No drafts to send.")
-        return
-
-    body_lines = [
-        f"Solopreneur Agent — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
-        f"{len(drafts)} draft(s) ready to post.\n",
+# ── SAVE DRAFTS TO FILE ───────────────────────────────────────────────────────
+def save_drafts(drafts):
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    lines = [
+        f"SOLOPRENEUR AGENT DRAFTS — {timestamp}",
+        f"{len(drafts)} draft(s) ready to post.",
         "=" * 60,
     ]
 
     for i, d in enumerate(drafts, 1):
-        body_lines += [
+        lines += [
             f"\n#{i} [{d['platform'].upper()}]",
             f"URL: {d['url']}",
             f"\n{d['draft']}",
             "\n" + "-" * 60,
         ]
 
-    body_lines += [
-        "\nTo use: copy each draft, paste it on the platform, post it.",
-        f"Product link: {GUMROAD_LINK}",
+    lines += [
+        "\nHOW TO USE:",
+        "1. Copy each draft above",
+        "2. Go to the platform URL",
+        "3. Paste and post",
+        f"\nProduct link: {GUMROAD_LINK}",
     ]
 
-    msg = MIMEMultipart()
-    msg["From"]    = EMAIL_ADDRESS
-    msg["To"]      = EMAIL_ADDRESS
-    msg["Subject"] = f"[Agent] {len(drafts)} reply draft(s) ready — {datetime.utcnow().strftime('%b %d')}"
-    msg.attach(MIMEText("\n".join(body_lines), "plain"))
+    output = "\n".join(lines)
 
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
-            server.sendmail(EMAIL_ADDRESS, EMAIL_ADDRESS, msg.as_string())
-        print(f"Email sent with {len(drafts)} drafts.")
-    except Exception as e:
-        print(f"Email send failed: {e}")
+    # save to file for GitHub Actions artifact
+    with open("drafts.txt", "w") as f:
+        f.write(output)
+
+    # also print to console so it shows in GitHub Actions logs
+    print("\n" + "=" * 60)
+    print("DRAFTS READY:")
+    print("=" * 60)
+    print(output)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def run_agent():
@@ -181,9 +174,8 @@ def run_agent():
         drafts.append({"platform": platform, "url": url, "draft": draft})
         time.sleep(2)
 
-    send_email(drafts)
+    save_drafts(drafts)
     print(f"\nDone. {len(drafts)} draft(s) processed.")
 
 if __name__ == "__main__":
     run_agent()
-
