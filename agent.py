@@ -1,15 +1,20 @@
 import os
 import re
-import json
 import time
+import smtplib
 import requests
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-SHEET_ID = "1QZNmClClOrN0Lr40c9cZg-rNbDpv8Yu_FBmNzs5BjEA"
-GUMROAD_LINK = "https://midskilled.gumroad.com/l/Zero-BudgetSolopreneurOS2026"
-PRODUCT_NAME = "Solopreneur OS 2026 – The AI-Powered Side Hustle & Freelance Toolkit"
+EMAIL_ADDRESS      = os.environ.get("EMAIL_ADDRESS")
+EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD")
+
+SHEET_ID      = "1QZNmClClOrN0Lr40c9cZg-rNbDpv8Yu_FBmNzs5BjEA"
+GUMROAD_LINK  = "https://midskilled.gumroad.com/l/Zero-BudgetSolopreneurOS2026"
+PRODUCT_NAME  = "Solopreneur OS 2026 – The AI-Powered Side Hustle & Freelance Toolkit"
 PRODUCT_PRICE = "$29"
 
 PRODUCT_SUMMARY = """
@@ -25,53 +30,42 @@ Price: $29 one-time. No subscription. Yours forever.
 """
 
 PLATFORM_INSTRUCTIONS = {
-    "quora": "Write a detailed, genuinely helpful answer to a Quora question about starting a side hustle or freelancing. Provide real value (3-5 specific tips). At the end, naturally mention the toolkit as a resource — don't make it the focus. Tone: knowledgeable, warm, personal.",
-    "facebook": "Write a Facebook group comment or post that feels human and community-oriented. Start by engaging with the topic, share a useful insight, then mention the toolkit casually as something that might help. Tone: friendly, conversational, not salesy.",
-    "pinterest": "Write a Pinterest pin description for a pin about side hustles, freelancing, or AI tools. Include relevant keywords naturally. End with a soft CTA and the link. Keep it under 150 words. Tone: inspiring, punchy, benefit-focused.",
+    "quora":    "Write a detailed, genuinely helpful answer to a Quora question about starting a side hustle or freelancing. Provide real value (3-5 specific tips). At the end, naturally mention the toolkit as a resource — don't make it the focus. Tone: knowledgeable, warm, personal. Up to 500 words.",
+    "facebook": "Write a Facebook group comment that feels human and community-oriented. Start by engaging with the topic, share a useful insight, then mention the toolkit casually as something that might help. Tone: friendly, conversational, not salesy. Under 200 words.",
+    "pinterest":"Write a Pinterest pin description about side hustles, freelancing, or AI tools. Include relevant keywords naturally. End with a soft CTA and the Gumroad link. Under 150 words. Tone: inspiring, punchy, benefit-focused.",
 }
 
-SHEET_API_BASE = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
-
-# ── GOOGLE SHEETS (via public API with API key, or service account) ───────────
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-
+# ── READ GOOGLE SHEET (public read — no auth needed) ─────────────────────────
 def get_sheet_rows():
-    """Fetch all rows from the sheet."""
-    url = f"{SHEET_API_BASE}/values/Sheet1!A2:D1000?key={GOOGLE_API_KEY}"
-    r = requests.get(url, timeout=15)
-    data = r.json()
-    rows = data.get("values", [])
-    return rows
-
-def update_sheet_cell(row_index, col, value):
-    """Update a single cell. row_index is 1-based (row 2 = index 1 in data = row 2 in sheet)."""
-    sheet_row = row_index + 2  # +2 because row 1 is header, data starts at row 2
-    range_notation = f"Sheet1!{col}{sheet_row}"
-    url = f"{SHEET_API_BASE}/values/{range_notation}?valueInputOption=RAW&key={GOOGLE_API_KEY}"
-    body = {"values": [[value]]}
-    r = requests.put(url, json=body, timeout=15)
-    return r.status_code == 200
+    url = (
+        f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
+        f"/values/Sheet1!A2:B1000"
+        f"?key={os.environ.get('GOOGLE_API_KEY')}"
+    )
+    try:
+        r = requests.get(url, timeout=15)
+        return r.json().get("values", [])
+    except Exception as e:
+        print(f"Sheet read error: {e}")
+        return []
 
 # ── FETCH URL CONTENT ─────────────────────────────────────────────────────────
 def fetch_url_content(url):
-    """Try to get readable text from a URL."""
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; SoloAgentBot/1.0)"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=10)
-        # strip HTML tags naively
         text = re.sub(r"<[^>]+>", " ", r.text)
         text = re.sub(r"\s+", " ", text).strip()
-        return text[:3000]  # limit context
+        return text[:2000]
     except Exception as e:
         return f"Could not fetch URL: {e}"
 
-# ── OPENROUTER AI CALL ────────────────────────────────────────────────────────
+# ── GENERATE DRAFT VIA OPENROUTER ─────────────────────────────────────────────
 def generate_reply(platform, url, page_content):
-    """Call OpenRouter free model to draft a reply."""
-    platform_key = platform.lower().strip()
-    instructions = PLATFORM_INSTRUCTIONS.get(platform_key, PLATFORM_INSTRUCTIONS["facebook"])
+    platform_key  = platform.lower().strip()
+    instructions  = PLATFORM_INSTRUCTIONS.get(platform_key, PLATFORM_INSTRUCTIONS["facebook"])
 
-    system_prompt = f"""You are a helpful solopreneur who genuinely wants to help people start side hustles and freelance businesses. You have a product that you mention naturally — never spammily.
+    system_prompt = f"""You are a helpful solopreneur who genuinely wants to help people start side hustles and freelance businesses. You have a product you mention naturally — never spammily.
 
 Product: {PRODUCT_NAME}
 Price: {PRODUCT_PRICE}
@@ -79,16 +73,15 @@ Link: {GUMROAD_LINK}
 Details: {PRODUCT_SUMMARY}
 
 Rules:
-- Always lead with genuine value. Help first, promote second.
-- Only mention the product once, near the end, and only if it's relevant.
-- Never say "as an AI" or reveal you're automated.
-- Sound like a real person who's been through the freelancing struggle.
-- Keep replies focused and under 300 words unless it's Quora (up to 500 words is fine).
+- Lead with genuine value. Help first, promote second.
+- Mention the product only once, near the end, only if relevant.
+- Never reveal you are automated or an AI.
+- Sound like a real person who has been through the freelancing struggle.
 """
 
     user_prompt = f"""Platform: {platform}
 URL: {url}
-Page content (excerpt): {page_content[:1500]}
+Page content excerpt: {page_content[:1200]}
 
 Task: {instructions}
 
@@ -99,12 +92,11 @@ Write the reply now."""
         "Content-Type": "application/json",
         "HTTP-Referer": "https://midskilled.gumroad.com",
     }
-
     body = {
         "model": "mistralai/mistral-7b-instruct:free",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user",   "content": user_prompt},
         ],
         "max_tokens": 600,
         "temperature": 0.8,
@@ -116,66 +108,82 @@ Write the reply now."""
         json=body,
         timeout=30,
     )
-
     if r.status_code == 200:
-        data = r.json()
-        return data["choices"][0]["message"]["content"].strip()
-    else:
-        return f"ERROR: OpenRouter returned {r.status_code}: {r.text[:200]}"
+        return r.json()["choices"][0]["message"]["content"].strip()
+    return f"ERROR {r.status_code}: {r.text[:200]}"
 
-# ── MAIN AGENT LOOP ───────────────────────────────────────────────────────────
+# ── SEND EMAIL ────────────────────────────────────────────────────────────────
+def send_email(drafts):
+    if not drafts:
+        print("No drafts to send.")
+        return
+
+    body_lines = [
+        f"Solopreneur Agent — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        f"{len(drafts)} draft(s) ready to post.\n",
+        "=" * 60,
+    ]
+
+    for i, d in enumerate(drafts, 1):
+        body_lines += [
+            f"\n#{i} [{d['platform'].upper()}]",
+            f"URL: {d['url']}",
+            f"\n{d['draft']}",
+            "\n" + "-" * 60,
+        ]
+
+    body_lines += [
+        "\nTo use: copy each draft, paste it on the platform, post it.",
+        f"Product link: {GUMROAD_LINK}",
+    ]
+
+    msg = MIMEMultipart()
+    msg["From"]    = EMAIL_ADDRESS
+    msg["To"]      = EMAIL_ADDRESS
+    msg["Subject"] = f"[Agent] {len(drafts)} reply draft(s) ready — {datetime.utcnow().strftime('%b %d')}"
+    msg.attach(MIMEText("\n".join(body_lines), "plain"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
+            server.sendmail(EMAIL_ADDRESS, EMAIL_ADDRESS, msg.as_string())
+        print(f"Email sent with {len(drafts)} drafts.")
+    except Exception as e:
+        print(f"Email send failed: {e}")
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
 def run_agent():
     print(f"\n{'='*50}")
-    print(f"Agent run started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Agent run: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"{'='*50}")
 
     rows = get_sheet_rows()
-
     if not rows:
-        print("No rows found in sheet. Add URLs to column A and platform to column B.")
+        print("Sheet is empty. Add URLs to column A and platform to column B.")
         return
 
-    processed = 0
-    skipped = 0
+    drafts = []
 
     for i, row in enumerate(rows):
-        # pad row to 4 columns
-        while len(row) < 4:
-            row.append("")
-
-        url, platform, status, draft = row[0], row[1], row[2], row[3]
-
+        if len(row) < 2:
+            continue
+        url, platform = row[0].strip(), row[1].strip()
         if not url or not platform:
-            skipped += 1
             continue
 
-        if status.lower() in ("done", "posted", "skip", "error"):
-            skipped += 1
-            continue
-
-        if status.lower() == "ready":
-            skipped += 1
-            continue
-
-        print(f"\nProcessing row {i+2}: [{platform}] {url[:60]}...")
-
-        # fetch page content
+        print(f"\nRow {i+2}: [{platform}] {url[:70]}")
         page_content = fetch_url_content(url)
-        print(f"  Fetched {len(page_content)} chars from URL")
+        print(f"  Fetched {len(page_content)} chars")
 
-        # generate reply
-        draft_reply = generate_reply(platform, url, page_content)
-        print(f"  Generated reply ({len(draft_reply)} chars)")
+        draft = generate_reply(platform, url, page_content)
+        print(f"  Draft generated ({len(draft)} chars)")
 
-        # write back to sheet: status = Ready, draft = the reply
-        update_sheet_cell(i, "C", "Ready")
-        update_sheet_cell(i, "D", draft_reply)
-        print(f"  ✓ Written to sheet row {i+2}")
+        drafts.append({"platform": platform, "url": url, "draft": draft})
+        time.sleep(2)
 
-        processed += 1
-        time.sleep(2)  # be polite to OpenRouter rate limits
-
-    print(f"\nDone. Processed: {processed} | Skipped: {skipped}")
+    send_email(drafts)
+    print(f"\nDone. {len(drafts)} draft(s) processed.")
 
 if __name__ == "__main__":
     run_agent()
+
