@@ -7,27 +7,28 @@ from datetime import datetime
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-SHEET_ID      = "1QZNmClClOrN0Lr40c9cZg-rNbDpv8Yu_FBmNzs5BjEA"
-GUMROAD_LINK  = "https://midskilled.gumroad.com/l/Zero-BudgetSolopreneurOS2026"
-PRODUCT_NAME  = "Solopreneur OS 2026 – The AI-Powered Side Hustle & Freelance Toolkit"
-PRODUCT_PRICE = "$29"
+SHEET_ID     = "1QZNmClClOrN0Lr40c9cZg-rNbDpv8Yu_FBmNzs5BjEA"
+PRODUCT_LINK = "https://cloutgrid.io"
+PRODUCT_NAME = "Cloutgrid"
+PRODUCT_PRICE = "$4.99/month"
 
 PRODUCT_SUMMARY = """
-The Solopreneur OS 2026 is a complete AI-powered toolkit for anyone starting a side hustle or freelance business with zero startup budget.
+Cloutgrid is a massive public grid where streamers, creators, and anyone who wants to be seen can claim a spot. The earlier you subscribe, the higher your spot on the grid — and the more eyes land on your profile.
 
-What's included:
-- 8-tab Excel workbook: income tracker, client CRM, invoice generator, hustle idea validator with ROI calculator, content calendar, budget planner, goals tracker
-- 6 professional PDFs: freelance contract, client proposal, 25 copy-paste email templates, 30-day first-sale plan, 100+ AI prompts for Claude/ChatGPT, Notion OS guide
-- Notion Business OS: 7 linked databases for tasks, projects, clients, content, finances, knowledge, and goals
-- Zero-cost marketing kit with 8 promo post templates
+- Every block links to your profile and your links
+- No algorithm burying you — your spot stays visible as long as you're subscribed
+- Early subscribers sit at the top permanently as the grid grows
+- 7-day free trial
+- $4.99/month after that
 
-Price: $29 one-time. No subscription. Yours forever.
+It's for streamers, YouTubers, TikTokers, or any creator who wants more visibility.
 """
 
 PLATFORM_INSTRUCTIONS = {
-    "quora":    "Write a detailed, genuinely helpful answer to a Quora question about starting a side hustle or freelancing. Provide real value (3-5 specific tips). At the end, naturally mention the toolkit as a resource — don't make it the focus. Tone: knowledgeable, warm, personal. Up to 500 words.",
-    "facebook": "Write a Facebook group comment that feels human and community-oriented. Start by engaging with the topic, share a useful insight, then mention the toolkit casually as something that might help. Tone: friendly, conversational, not salesy. Under 200 words.",
-    "pinterest":"Write a Pinterest pin description about side hustles, freelancing, or AI tools. Include relevant keywords naturally. End with a soft CTA and the Gumroad link. Under 150 words. Tone: inspiring, punchy, benefit-focused.",
+    "quora":    "Write a detailed, genuinely helpful answer to the question. Provide real value (3-5 specific tips). At the end, naturally mention Cloutgrid as a resource — don't make it the focus. Tone: knowledgeable, warm, personal. Up to 500 words.",
+    "facebook": "Write a Facebook group comment that feels human and community-oriented. Start by engaging with the topic, share a useful insight, then mention Cloutgrid casually. Tone: friendly, conversational, not salesy. Under 200 words.",
+    "pinterest":"Write a Pinterest pin description for creators or streamers. Include relevant keywords naturally. End with a soft CTA and the link. Under 150 words. Tone: inspiring, punchy, benefit-focused.",
+    "reddit":   "Write a genuine, helpful Reddit comment that adds value to the thread first. Only mention Cloutgrid briefly at the end if it's naturally relevant. Never sound promotional. Sound like a real person. Under 200 words.",
 }
 
 # ── READ GOOGLE SHEET ─────────────────────────────────────────────────────────
@@ -58,20 +59,21 @@ def fetch_url_content(url):
 # ── GENERATE DRAFT ────────────────────────────────────────────────────────────
 def generate_reply(platform, url, page_content):
     platform_key = platform.lower().strip()
-    instructions = PLATFORM_INSTRUCTIONS.get(platform_key, PLATFORM_INSTRUCTIONS["facebook"])
+    instructions = PLATFORM_INSTRUCTIONS.get(platform_key, PLATFORM_INSTRUCTIONS["reddit"])
 
-    system_prompt = f"""You are a helpful solopreneur who genuinely wants to help people start side hustles and freelance businesses. You have a product you mention naturally — never spammily.
+    system_prompt = f"""You are a creator and streamer who genuinely wants to help others grow. You built or use a platform called Cloutgrid and mention it naturally when relevant.
 
 Product: {PRODUCT_NAME}
 Price: {PRODUCT_PRICE}
-Link: {GUMROAD_LINK}
+Link: {PRODUCT_LINK}
 Details: {PRODUCT_SUMMARY}
 
 Rules:
-- Lead with genuine value. Help first, promote second.
-- Mention the product only once, near the end, only if relevant.
+- Lead with genuine value. Help first, mention product second.
+- Only mention Cloutgrid once, near the end, only if naturally relevant.
 - Never reveal you are automated or an AI.
-- Sound like a real person who has been through the freelancing struggle.
+- Sound like a real creator who has been through the struggle of getting discovered.
+- Never be pushy or salesy.
 """
 
     user_prompt = f"""Platform: {platform}
@@ -85,10 +87,10 @@ Write the reply now."""
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://midskilled.gumroad.com",
+        "HTTP-Referer": "https://cloutgrid.io",
     }
     body = {
-        "model": "openrouter/free",
+        "model": "openrouter/auto",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
@@ -111,7 +113,7 @@ Write the reply now."""
 def save_drafts(drafts):
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     lines = [
-        f"SOLOPRENEUR AGENT DRAFTS — {timestamp}",
+        f"CLOUTGRID AGENT DRAFTS — {timestamp}",
         f"{len(drafts)} draft(s) ready to post.",
         "=" * 60,
     ]
@@ -129,16 +131,14 @@ def save_drafts(drafts):
         "1. Copy each draft above",
         "2. Go to the platform URL",
         "3. Paste and post",
-        f"\nProduct link: {GUMROAD_LINK}",
+        f"\nCloutgrid: {PRODUCT_LINK}",
     ]
 
     output = "\n".join(lines)
 
-    # save to file for GitHub Actions artifact
     with open("drafts.txt", "w") as f:
         f.write(output)
 
-    # also print to console so it shows in GitHub Actions logs
     print("\n" + "=" * 60)
     print("DRAFTS READY:")
     print("=" * 60)
